@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" font-family="Georgia, 'Times New Roman', serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d0b24"/>
+      <stop offset="1" stop-color="#1c0f2e"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8b72ff"/>
+      <stop offset=".5" stop-color="#c36bff"/>
+      <stop offset="1" stop-color="#ff6f91"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx=".15" cy=".1" r=".6"><stop offset="0" stop-color="#7c5cff" stop-opacity=".55"/><stop offset="1" stop-color="#7c5cff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowB" cx=".9" cy=".9" r=".6"><stop offset="0" stop-color="#ff4f78" stop-opacity=".40"/><stop offset="1" stop-color="#ff4f78" stop-opacity="0"/></radialGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#000" flood-opacity=".45"/></filter>
+    <g id="lines" fill="#1e1c32" fill-opacity=".16">
+      <rect x="18" y="48" width="84" height="5" rx="2.5"/><rect x="18" y="62" width="74" height="5" rx="2.5"/>
+      <rect x="18" y="76" width="84" height="5" rx="2.5"/><rect x="18" y="90" width="60" height="5" rx="2.5"/>
+      <rect x="18" y="104" width="80" height="5" rx="2.5"/>
+    </g>
+  </defs>
+
+  <rect width="1280" height="400" fill="url(#bg)"/>
+  <rect width="1280" height="400" fill="url(#glowA)"/>
+  <rect width="1280" height="400" fill="url(#glowB)"/>
+
+  <!-- floating documents -->
+  <g filter="url(#sh)">
+    <g transform="translate(830 70) rotate(-14)">
+      <rect width="120" height="160" rx="8" fill="#ece9f6"/><rect x="18" y="22" width="60" height="9" rx="4" fill="#1e1c32" fill-opacity=".55"/>
+      <use href="#lines"/><rect x="14" y="128" width="40" height="20" rx="4" fill="#2b6ce6"/>
+      <text x="34" y="143" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">DOCX</text>
+    </g>
+    <g transform="translate(1000 150) rotate(9)">
+      <rect width="130" height="174" rx="8" fill="#fffdf8"/><rect x="18" y="22" width="66" height="9" rx="4" fill="#1e1c32" fill-opacity=".55"/>
+      <use href="#lines"/><rect x="18" y="116" width="94" height="26" rx="4" fill="url(#brand)" fill-opacity=".45"/>
+      <rect x="14" y="146" width="36" height="20" rx="4" fill="#e5484d"/>
+      <text x="32" y="161" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">PDF</text>
+    </g>
+    <g transform="translate(1130 40) rotate(-6)">
+      <rect width="100" height="134" rx="8" fill="#ece9f6" opacity=".85"/><use href="#lines" transform="scale(.8)"/>
+      <rect x="12" y="106" width="36" height="18" rx="4" fill="#16965a"/>
+      <text x="30" y="119" font-family="Arial, sans-serif" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">XLSX</text>
+    </g>
+    <g transform="translate(900 250) rotate(18)" opacity=".8">
+      <rect width="96" height="128" rx="8" fill="#ece9f6"/><use href="#lines" transform="scale(.78)"/>
+      <rect x="12" y="100" width="32" height="18" rx="4" fill="#b44ad8"/>
+      <text x="28" y="113" font-family="Arial, sans-serif" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">JPG</text>
+    </g>
+  </g>
+
+  <!-- logo + title -->
+  <g transform="translate(90 112)">
+    <rect x="12" y="-6" width="54" height="70" rx="9" fill="url(#brand)" opacity=".45"/>
+    <rect x="0" y="4" width="54" height="70" rx="9" fill="url(#brand)"/>
+    <rect x="11" y="22" width="30" height="5" rx="2.5" fill="#fff"/>
+    <rect x="11" y="34" width="33" height="5" rx="2.5" fill="#fff" opacity=".8"/>
+    <rect x="11" y="46" width="21" height="5" rx="2.5" fill="#fff" opacity=".8"/>
+    <text x="80" y="58" font-size="64" font-weight="600" fill="#eeedf8" letter-spacing="-1">Pidify</text>
+  </g>
+  <text x="90" y="262" font-size="42" font-weight="600" fill="#eeedf8">Every file. <tspan font-style="italic" fill="url(#brand)">Any format.</tspan></text>
+  <text x="92" y="306" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#a3a1bd">Convert · Merge PDFs · Turn phone photos into clean scans</text>
+</svg>
