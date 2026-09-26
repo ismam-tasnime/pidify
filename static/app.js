@@ -362,16 +362,15 @@ function showDownload(blob, name, extra = "") {
   paintStatus($("#result .status"), `Ready · ${name} · ${humanSize(blob.size)}${extra}`, "ok");
 }
 
-function checkBatch(parts) {
-  const total = parts.reduce((s, i) => s + i.file.size, 0);
+function checkBatch(parts, total = parts.reduce((s, i) => s + i.file.size, 0)) {
   if (parts.length > state.maxBatchFiles) return `You can use up to ${state.maxBatchFiles} files at once.`;
   if (total > state.maxBatchMb * 1024 ** 2) return `These files add up to ${humanSize(total)}. The limit is ${state.maxBatchMb} MB.`;
   return "";
 }
 
-async function runBatch(url, body, fallback, busyText, parts) {
+async function runBatch(url, body, fallback, busyText, parts, totalBytes) {
   clearResult();
-  const problem = checkBatch(parts);
+  const problem = checkBatch(parts, totalBytes);
   if (problem) return showResult(problem, "err");
   showResult(busyText, "busy");
   state.working = true;
@@ -416,6 +415,45 @@ function scanOptions() {
   };
 }
 const optionsKey = () => JSON.stringify(scanOptions());
+
+// Phone photos are often 12+ MP; the scanner never needs more than SCAN_SIDE px.
+// Shrinking in the browser first makes uploads ~4x smaller and the server faster.
+const SCAN_SIDE = 2400;
+const PREVIEW_SIDE = 1400;
+const RESIZABLE = ["jpg", "jpeg", "png", "webp", "bmp"];
+
+function photoFor(item, maxSide) {
+  item.prepared ??= {};
+  item.prepared[maxSide] ??= shrinkPhoto(item.file, item.ext, maxSide);
+  return item.prepared[maxSide];
+}
+
+async function shrinkPhoto(file, ext, maxSide) {
+  if (!RESIZABLE.includes(ext) || typeof createImageBitmap !== "function") return file;
+  let bmp;
+  try {
+    // Browsers apply the photo's EXIF rotation here, so the result is upright.
+    bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const scale = maxSide / Math.max(bmp.width, bmp.height);
+    if (scale >= 1) return file;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; // transparent PNGs become white paper, not black
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
+    if (!blob) return file;
+    const stem = file.name.replace(/\.[^.]+$/, "");
+    return new File([blob], `${stem}.jpg`, { type: "image/jpeg" });
+  } catch {
+    return file; // anything odd: let the server handle the original
+  } finally {
+    bmp?.close?.();
+  }
+}
 
 function appendOptions(body) {
   const o = scanOptions();
@@ -471,7 +509,7 @@ function pumpPreviews() {
 async function loadPreview(item) {
   const key = optionsKey();
   const body = new FormData();
-  body.append("file", item.file);
+  body.append("file", await photoFor(item, PREVIEW_SIDE));
   appendOptions(body);
   let result;
   try {
@@ -499,15 +537,41 @@ function scanOptionsChanged() {
   optTimer = setTimeout(queuePreviews, 200);
 }
 
-function scan() {
+async function scan() {
   const parts = state.items.filter(canScan);
   if (!parts.length || state.working) return;
+  const n = parts.length;
+  state.working = true;
+  refreshPanel();
+  showResult(`Preparing ${n} photo${n > 1 ? "s" : ""}…`, "busy");
   const body = new FormData();
-  parts.forEach((i) => body.append("files", i.file));
+  let bytes = 0;
+  try {
+    for (const [idx, i] of parts.entries()) {
+      const photo = await photoFor(i, SCAN_SIDE);
+      bytes += photo.size;
+      body.append("files", photo);
+      if (n > 3) showResult(`Preparing photos… ${idx + 1} of ${n}`, "busy");
+    }
+  } finally {
+    state.working = false;
+  }
   appendOptions(body);
   body.append("name", $("#scanName").value.trim() || "scan");
-  runBatch("/api/scan", body, "scan.pdf",
-    `Cleaning ${parts.length} photo${parts.length > 1 ? "s" : ""} and building your PDF…`, parts);
+
+  // Big batches take a while on a small server: show a running clock.
+  const started = Date.now();
+  const label = `Cleaning ${n} photo${n > 1 ? "s" : ""} and building your PDF`;
+  const tick = setInterval(() => {
+    const s = Math.round((Date.now() - started) / 1000);
+    const status = $("#result .status");
+    if (status.classList.contains("busy")) paintStatus(status, `${label}… ${s}s${n > 5 ? " (big batches can take a few minutes, keep this tab open)" : ""}`, "busy");
+  }, 1000);
+  try {
+    await runBatch("/api/scan", body, "scan.pdf", `${label}…`, parts, bytes);
+  } finally {
+    clearInterval(tick);
+  }
 }
 
 // --- Before/after viewer ----------------------------------------------------- //
