@@ -1,0 +1,17 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local tooling / editor
+.claude/
+.vscode/
+.idea/
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
