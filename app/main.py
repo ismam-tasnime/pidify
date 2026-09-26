@@ -151,7 +151,8 @@ async def scan_preview(file: UploadFile = File(...), mode: str = Form("color"),
         await _save_upload(file, src, 0, MAX_UPLOAD_MB)
 
         def work():
-            arr, info = scanner.clean(scanner.load_photo(src), opts)
+            # Previews only need to look right on screen, so work on a smaller copy.
+            arr, info = scanner.clean(scanner.load_photo(src, scanner.PREVIEW_SIDE), opts)
             return scanner.preview_jpeg(arr, workdir / "preview.jpg"), info
 
         out, info = await run_in_threadpool(work)
@@ -190,17 +191,11 @@ async def scan(files: list[UploadFile] = File(...), mode: str = Form("color"),
             used = await _save_upload(upload, src, used, MAX_MERGE_MB)
             sources.append(src)
 
-        def work():
-            pages = []
-            for src in sources:
-                try:
-                    arr, _ = scanner.clean(scanner.load_photo(src), opts)
-                except Exception as e:
-                    raise converters.ConversionError(f"{src.name}: couldn't read this photo ({e}).")
-                pages.append(scanner.to_pil(arr, opts.mode))
-            return scanner.save_pdf(pages, workdir / f"{out_name}.pdf")
+        def bad_photo(src: Path, e: Exception) -> Exception:
+            return converters.ConversionError(f"{src.name}: couldn't read this photo ({e}).")
 
-        out = await run_in_threadpool(work)
+        out = await run_in_threadpool(scanner.build_pdf, sources, opts,
+                                      workdir / f"{out_name}.pdf", bad_photo)
     except converters.ConversionError as e:
         shutil.rmtree(workdir, ignore_errors=True)
         raise HTTPException(422, str(e))

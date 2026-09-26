@@ -10,6 +10,7 @@ Pipeline for each photo:
 """
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,7 +18,10 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
-MAX_SIDE = 3000
+# 2400 px on the long side is ~290 DPI on an A4 page: sharper than a typical office
+# scanner, while keeping memory low enough for small (512 MB) servers.
+MAX_SIDE = 2400
+PREVIEW_SIDE = 1400
 DETECT_SIDE = 900
 
 
@@ -40,22 +44,21 @@ class ScanInfo:
 # Loading
 # --------------------------------------------------------------------------- #
 
-def load_photo(path: Path) -> np.ndarray:
-    """Load any supported image as BGR, honouring EXIF rotation."""
+def load_photo(path: Path, max_side: int = MAX_SIDE) -> np.ndarray:
+    """Load any supported image as BGR, honouring EXIF rotation, at most `max_side` px."""
     img = Image.open(path)
+    # For JPEGs, decode straight at a reduced size: a 12 MP photo never
+    # has to exist in memory at full resolution.
+    img.draft("RGB", (max_side, max_side))
     img = ImageOps.exif_transpose(img)
+    img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
     if img.mode in ("RGBA", "LA", "P"):
         img = img.convert("RGBA")
         bg = Image.new("RGB", img.size, "white")
         bg.paste(img, mask=img.split()[-1])
         img = bg
     img = img.convert("RGB")
-    arr = cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
-    h, w = arr.shape[:2]
-    if max(h, w) > MAX_SIDE:
-        s = MAX_SIDE / max(h, w)
-        arr = cv2.resize(arr, (round(w * s), round(h * s)), interpolation=cv2.INTER_AREA)
-    return arr
+    return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
 
 
 # --------------------------------------------------------------------------- #
@@ -170,16 +173,22 @@ def find_fingers(img: np.ndarray) -> tuple[np.ndarray, int]:
 def even_lighting(img: np.ndarray, ignore: np.ndarray | None = None) -> np.ndarray:
     """Divide out the paper's brightness so shadows and tint vanish, keeping ink colours."""
     h, w = img.shape[:2]
-    k = max(15, round(min(h, w) / 25)) | 1
-    work = img.copy()
+    # The paper's brightness is a smooth, blurry map, so estimate it on a small
+    # copy (about 16x fewer pixels) and scale it back up. Much faster, same result.
+    s = min(1.0, 600 / max(h, w))
+    sw, sh = max(1, round(w * s)), max(1, round(h * s))
+    small = cv2.resize(img, (sw, sh), interpolation=cv2.INTER_AREA)
+    k = max(5, round(min(sh, sw) / 25)) | 1
     if ignore is not None and ignore.any():
         # Keep fingers from darkening the estimated paper around them.
-        work = cv2.inpaint(work, ignore, 5, cv2.INPAINT_TELEA)
+        small_mask = cv2.resize(ignore, (sw, sh), interpolation=cv2.INTER_NEAREST)
+        small = cv2.inpaint(small, small_mask, 3, cv2.INPAINT_TELEA)
     # Closing wipes out text (dark, thin), leaving the paper; blur smooths it.
-    bg = cv2.morphologyEx(work, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    bg = cv2.morphologyEx(small, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
     bg = cv2.GaussianBlur(bg, (0, 0), k / 2)
-    out = cv2.divide(img.astype(np.float32), np.maximum(bg.astype(np.float32), 1), scale=255)
-    out = np.clip(out, 0, 255).astype(np.uint8)
+    bg = cv2.max(cv2.resize(bg, (w, h), interpolation=cv2.INTER_LINEAR), 1)
+    # uint8 divide saturates at 255 by itself: no float copies of the full image.
+    out = cv2.divide(img, bg, scale=255)
     # Gentle contrast curve: near-white -> white, ink stays strong.
     lut = np.clip((np.arange(256) - 25) * 255 / 215, 0, 255).astype(np.uint8)
     return cv2.LUT(out, lut)
@@ -212,7 +221,17 @@ def to_mode(img: np.ndarray, mode: str, evened: bool = False) -> np.ndarray:
     return img
 
 
+# Clean one photo at a time across the whole server (previews and PDFs alike),
+# so memory stays flat on small machines no matter how many requests arrive.
+_one_at_a_time = threading.Lock()
+
+
 def clean(img: np.ndarray, opts: ScanOptions) -> tuple[np.ndarray, ScanInfo]:
+    with _one_at_a_time:
+        return _clean(img, opts)
+
+
+def _clean(img: np.ndarray, opts: ScanOptions) -> tuple[np.ndarray, ScanInfo]:
     info = ScanInfo()
     if opts.crop:
         quad = find_page(img)
@@ -243,21 +262,47 @@ def clean(img: np.ndarray, opts: ScanOptions) -> tuple[np.ndarray, ScanInfo]:
 # Output helpers
 # --------------------------------------------------------------------------- #
 
-A4_WIDTH_IN = 8.27
+A4_WIDTH_PT = 595  # PDF points (1/72 inch)
 
 
-def to_pil(arr: np.ndarray, mode: str) -> Image.Image:
-    if arr.ndim == 2:
-        im = Image.fromarray(arr)
-        return im.convert("1", dither=Image.Dither.NONE) if mode == "bw" else im
-    return Image.fromarray(cv2.cvtColor(arr, cv2.COLOR_BGR2RGB))
+def encode_page(arr: np.ndarray, mode: str) -> bytes:
+    """Compress one cleaned page: PNG for black & white (tiny and crisp), JPEG otherwise."""
+    if mode == "bw":
+        ok, buf = cv2.imencode(".png", arr, [cv2.IMWRITE_PNG_BILEVEL, 1])
+    else:
+        ok, buf = cv2.imencode(".jpg", arr, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    if not ok:
+        raise ValueError("couldn't encode page")
+    return buf.tobytes()
 
 
-def save_pdf(pages: list[Image.Image], dest: Path) -> Path:
-    # Pick a DPI so each page comes out roughly A4-wide.
-    first, rest = pages[0], pages[1:]
-    dpi = max(72, round(first.width / A4_WIDTH_IN))
-    first.save(dest, "PDF", resolution=dpi, save_all=True, append_images=rest, quality=88)
+def build_pdf(photos: list[Path], opts: ScanOptions, dest: Path,
+              on_error=None) -> Path:
+    """Clean each photo and add it to the PDF straight away, one page at a time.
+
+    Only one photo is ever held uncompressed, so memory stays flat whether
+    there are 3 photos or 50.
+    """
+    import pymupdf
+
+    doc = pymupdf.open()
+    try:
+        for photo in photos:
+            try:
+                arr, _ = clean(load_photo(photo), opts)
+            except Exception as e:
+                if on_error:
+                    raise on_error(photo, e)
+                raise
+            h, w = arr.shape[:2]
+            data = encode_page(arr, opts.mode)
+            del arr
+            # Every page is A4 width; height follows the photo's shape.
+            page = doc.new_page(width=A4_WIDTH_PT, height=A4_WIDTH_PT * h / w)
+            page.insert_image(page.rect, stream=data)
+        doc.save(dest, garbage=3, deflate=True)
+    finally:
+        doc.close()
     return dest
 
 
