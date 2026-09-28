@@ -15,3 +15,17 @@ __pycache__/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Secrets — never commit (repo is public)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials*.json
+service-account*.json
+supabase/.temp/
+supabase/.env
